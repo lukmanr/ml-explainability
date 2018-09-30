@@ -67,7 +67,7 @@ class Explainer:
 
 
     def __get_value_mapper(self):
-        col_buckets=[]
+        self.__col_buckets=[]
         for i in range(0,len(
             self.__explainer.categorical_names)):
             cols = [(
@@ -82,7 +82,7 @@ class Explainer:
                 float(
                     self.__explainer.categorical_names[i][-1].split(' > ')[-1]),
                 float('inf')))
-            col_buckets.append(cols)
+            self.__col_buckets.append(cols)
 
         tr_data = pandas.read_csv(
             StringIO(self.__csv_file),
@@ -97,19 +97,39 @@ class Explainer:
 
         val_buckets = []
         for col in range(tr_data.shape[1]):
-            val_list = {i:[] for i in range(len(col_buckets[col]))}
+            val_list = {i:[] for i in range(len(self.__col_buckets[col]))}
             for val in tr_data[:,col]:
-                for buck in range(len(col_buckets[col])):
-                    if float(val) > col_buckets[col][buck][0] and float(val) <= col_buckets[col][buck][1]:
+                for buck in range(len(self.__col_buckets[col])):
+                    if float(
+                        val) > self.__col_buckets[col][buck][0] and float(
+                        val) <= self.__col_buckets[col][buck][1]:
+                        
                         val_list[buck].append(float(val))
                         break
             val_buckets.append(
               [str(int(np.median(val_list[buck]))) if np.median(val_list[buck]).is_integer() else str(
-                  np.median(val_list[buck])) for buck in range(len(col_buckets[col]))])
+                  np.median(val_list[buck])) for buck in range(len(self.__col_buckets[col]))])
        
         return list(itertools.chain.from_iterable(val_buckets))
 
 
+    def __encode_record(self, record):
+        encoded = []
+        record = record.split(',')
+        for val in range(
+            len(record)):
+            for buck in range(
+                len(self.__col_buckets[val])):
+                if float(
+                    record[val]) > self.__col_buckets[val][buck][0] and float(
+                    record[val]) <= self.__col_buckets[val][buck][1]:
+                    
+                    encoded.append(buck)
+                    break
+        return np.array(encoded)
+            
+            
+    
     def __predict(self, record):
         pred_data = [
             ','.join(['1']+ list(
@@ -208,23 +228,6 @@ class Explainer:
                 accurate = accurate + 1
         
         return {'accuracy' : accurate/float(sample)}
-        
-    
-    def __predict_random(self):
-        
-        idx = random.randint(0,len(self.__dataset.test))
-        
-        
-        prediction = {'prediction': self.__predict_record(
-            self.__dataset.test[idx])}
-        
- 
-        prediction['label'] = self.__explainer.class_names[
-            self.__dataset.labels_test[idx]]
-    
-        prediction['idx'] = idx
-        
-        return prediction
 
     
     def explain_model(
@@ -271,6 +274,45 @@ class Explainer:
             'prediction']]
             
             
+    def __explain_record(
+        self,
+        record,
+        threshold = 0.95,
+        show_in_notebook = False):
+
+        pred = self.__predict_record(record)
+
+        exp = self.__explainer.explain_instance(
+            record,
+            self.__predict,
+            threshold)
+
+        if show_in_notebook:
+            exp.show_in_notebook()
+
+        return {
+            'anchor': ' AND '.join(exp.names()),
+            'precision': exp.precision(),
+            'coverage' : exp.coverage(),
+            'prediction' : pred}
+
+    
+    def explain_record(
+        self,
+        record,
+        threshold = 0.95,
+        show_in_notebook = False):
+        
+        self.__check_requisites()
+        record = self.__encode_record(
+            record)
+        
+        return self.__explain_record(
+            record,
+            threshold,
+            show_in_notebook)
+        
+        
     def explain_random_record(
         self,
         threshold = 0.95,
@@ -278,21 +320,12 @@ class Explainer:
         
         self.__check_requisites()
         
-        random_pred = self.__predict_random()
+        idx = random.randint(0,len(self.__dataset.test))
         
-        random_pred['exp'] = self.__explainer.explain_instance(
-            self.__dataset.test[random_pred['idx']],
-            self.__predict,
-            threshold)
-        
-        if show_in_notebook:
-            random_pred['exp'].show_in_notebook()
-            
-        return {
-            'anchor': ' AND '.join(random_pred['exp'].names()),
-            'precision': random_pred['exp'].precision(),
-            'coverage' : random_pred['exp'].coverage(),
-            'prediction' : random_pred['prediction']}
+        return self.__explain_record(
+            self.__dataset.test[idx],
+            threshold,
+            show_in_notebook)
         
                    
     def __check_requisites(self):
