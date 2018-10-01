@@ -70,23 +70,29 @@ class Explainer:
         self.__col_buckets=[]
         for i in range(0,len(
             self.__explainer.categorical_names)):
-            cols = [(
-                float('-inf'),
-                float(
-                    self.__explainer.categorical_names[i][0].split(' <= ')[-1]))]
-            for mid in self.__explainer.categorical_names[i][1:-1]:
+            
+            if i in self.__dataset.ordinal_features:
+            
+                cols = [(
+                    float('-inf'),
+                    float(
+                        self.__explainer.categorical_names[i][0].split(' <= ')[-1]))]
+                for mid in self.__explainer.categorical_names[i][1:-1]:
+                    cols.append((
+                        float(mid.split(' < ')[0]),
+                        float(mid.split(' <= ')[-1])))
                 cols.append((
-                    float(mid.split(' < ')[0]),
-                    float(mid.split(' <= ')[-1])))
-            cols.append((
-                float(
-                    self.__explainer.categorical_names[i][-1].split(' > ')[-1]),
-                float('inf')))
-            self.__col_buckets.append(cols)
+                    float(
+                        self.__explainer.categorical_names[i][-1].split(' > ')[-1]),
+                    float('inf')))
+                self.__col_buckets.append(cols)
+            
+            else: 
+                self.__col_buckets.append(self.__explainer.categorical_names[i])
 
         tr_data = pandas.read_csv(
             StringIO(self.__csv_file),
-            header= None if self.__skip_first else 0,
+            header = 0,
             names = self.__feature_names,
             delimiter=',',
             na_filter=True,
@@ -97,20 +103,26 @@ class Explainer:
 
         val_buckets = []
         for col in range(tr_data.shape[1]):
-            val_list = {i:[] for i in range(len(self.__col_buckets[col]))}
-            for val in tr_data[:,col]:
-                for buck in range(len(self.__col_buckets[col])):
-                    if float(
-                        val) > self.__col_buckets[col][buck][0] and float(
-                        val) <= self.__col_buckets[col][buck][1]:
-                        
-                        val_list[buck].append(float(val))
-                        break
-            val_buckets.append(
-              [str(int(np.median(val_list[buck]))) if np.median(val_list[buck]).is_integer() else str(
-                  np.median(val_list[buck])) for buck in range(len(self.__col_buckets[col]))])
-       
+            
+            if col in self.__dataset.ordinal_features:
+            
+                val_list = {i:[] for i in range(len(self.__col_buckets[col]))}
+                for val in tr_data[:,col]:
+                    for buck in range(len(self.__col_buckets[col])):
+                        if float(
+                            val) > self.__col_buckets[col][buck][0] and float(
+                            val) <= self.__col_buckets[col][buck][1]:
+
+                            val_list[buck].append(float(val))
+                            break
+                val_buckets.append(
+                  [str(int(np.median(val_list[buck]))) if np.median(val_list[buck]).is_integer() else str(
+                      np.median(val_list[buck])) for buck in range(len(self.__col_buckets[col]))])
+            else:
+                val_buckets.append(self.__col_buckets[col])
+
         return list(itertools.chain.from_iterable(val_buckets))
+
 
 
     def __encode_record(self, record):
@@ -118,14 +130,22 @@ class Explainer:
         record = record.split(',')
         for val in range(
             len(record)):
-            for buck in range(
-                len(self.__col_buckets[val])):
-                if float(
-                    record[val]) > self.__col_buckets[val][buck][0] and float(
-                    record[val]) <= self.__col_buckets[val][buck][1]:
-                    
-                    encoded.append(buck)
-                    break
+            
+            if val in self.__dataset.ordinal_features:
+                for buck in range(
+                    len(self.__col_buckets[val])):
+                    if float(
+                        record[val]) > self.__col_buckets[val][buck][0] and float(
+                        record[val]) <= self.__col_buckets[val][buck][1]:
+
+                        encoded.append(buck)
+                        break
+            else:
+                for buck in range(
+                    len(self.__col_buckets[val])):
+                    if record[val] == self.__col_buckets[val][buck]:
+                        encoded.append(buck)
+                        break
         return np.array(encoded)
             
             
@@ -138,10 +158,11 @@ class Explainer:
     
     def __predict(self, record):
 
-        pred_data = [','.join(['1'] + self.__decode_record(
-            record[i,:])) for i in range(record.shape[0])]
+        pred_data = [','.join(self.__pre_pad + self.__decode_record(
+            record[i,:]) + self.__post_pad) for i in range(
+            record.shape[0])]
         predictions = self.__cmle_predict(pred_data)
-        predictions = [x['predicted_monetary'] for x in predictions]
+        predictions = [self.__output_func(x) for x in predictions]
         predictions = self.__transform_labels(predictions)
         predictions = [self.__label_map[x] for x in predictions]
         predictions = np.array(predictions)
@@ -154,6 +175,7 @@ class Explainer:
         gcs_path,
         target_idx,
         features_to_use=None,
+        categorical_features=[],
         feature_names=None,
         skip_first=False
         ):
@@ -162,6 +184,10 @@ class Explainer:
         self.__features_to_use = features_to_use
         self.__feature_names = feature_names
         self.__skip_first = skip_first
+        
+        self.__numeric_features = list(set(
+            features_to_use).difference(
+            set(categorical_features)))
         
         self.__csv_file = file_io.FileIO(
             gcs_path,
@@ -175,7 +201,7 @@ class Explainer:
             feature_names = feature_names,
             skip_first = skip_first,
             target_idx =target_idx,
-            categorical_features = [],
+            categorical_features = categorical_features,
             features_to_use= features_to_use,
             discretize = True,
             feature_transformations = {
@@ -206,10 +232,17 @@ class Explainer:
         self,
         gcp_project,
         gcp_model,
-        gcp_model_version=None):
+        gcp_model_version=None,
+        padding = (1,0),
+        output_func = lambda x: x[
+            'predictions'][0]):
+    
         self.__gcp_project = gcp_project
         self.__gcp_model = gcp_model
         self.__gcp_model_version = gcp_model_version
+        self.__pre_pad = ['0' for _ in range(padding[0])]
+        self.__post_pad = ['0' for _ in range(padding[1])]
+        self.__output_func = output_func
         self.__cmle_service = googleapiclient.discovery.build(
             'ml', 'v1').projects()
     
