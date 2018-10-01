@@ -129,13 +129,17 @@ class Explainer:
         return np.array(encoded)
             
             
+    def __decode_record(self, record):
+        return list(itertools.compress(
+            self.__value_mapper,
+            record.todense().astype(
+                int).tolist()[0]))
+    
     
     def __predict(self, record):
-        pred_data = [
-            ','.join(['1']+ list(
-                itertools.compress(
-                    self.__value_mapper,
-                    record.todense()[i,:].astype(int).tolist()[0]))) for i in range(record.shape[0])]
+
+        pred_data = [','.join(['1'] + self.__decode_record(
+            record[i,:])) for i in range(record.shape[0])]
         predictions = self.__cmle_predict(pred_data)
         predictions = [x['predicted_monetary'] for x in predictions]
         predictions = self.__transform_labels(predictions)
@@ -223,7 +227,8 @@ class Explainer:
             
             if self.__explainer.class_names[
                 self.__dataset.labels_test[idx]] == self.__predict_record(
-                self.__dataset.test[idx]):
+                self.__one_hot_encode(
+                    self.__dataset.test[idx])):
                 
                 accurate = accurate + 1
         
@@ -250,7 +255,9 @@ class Explainer:
             
             anchors['prediction'].append(
                 self.__predict_record(
-                    self.__dataset.test[idx]))
+                    self.__one_hot_encode(
+                        self.__dataset.test[idx])))
+            
             
             exp = self.__explainer.explain_instance(
             self.__dataset.test[idx],
@@ -279,8 +286,10 @@ class Explainer:
         record,
         threshold = 0.95,
         show_in_notebook = False):
+        
+        one_hot_record = self.__one_hot_encode(record)
 
-        pred = self.__predict_record(record)
+        pred = self.__predict_record(one_hot_record)
 
         exp = self.__explainer.explain_instance(
             record,
@@ -294,7 +303,8 @@ class Explainer:
             'anchor': ' AND '.join(exp.names()),
             'precision': exp.precision(),
             'coverage' : exp.coverage(),
-            'prediction' : pred}
+            'prediction' : pred,
+            'record': self.__decode_record(one_hot_record)}
 
     
     def explain_record(
@@ -304,6 +314,7 @@ class Explainer:
         show_in_notebook = False):
         
         self.__check_requisites()
+        
         record = self.__encode_record(
             record)
         
@@ -336,14 +347,16 @@ class Explainer:
             raise Exception(
                 'Please create a cmle client using create_cmle_client(...)')
     
+    def __one_hot_encode(self, record):
+
+        return self.__explainer.encoder.transform(
+                    record.reshape(1, -1))
+    
     def __predict_record(
         self,
         record):
-
         return self.__explainer.class_names[list(
-            self.__predict(
-                self.__explainer.encoder.transform(
-                    record.reshape(1, -1))))[0]]
+            self.__predict(record))[0]]
         
 
     def __init__(
