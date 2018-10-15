@@ -296,6 +296,45 @@ class Explainer:
         return {'accuracy' : accurate/float(sample)}
 
     
+    def __explain_sample(
+        self,
+        idx,
+        threshold):
+
+        anchor = {}
+
+        anchor['prediction'] = self.__predict_record(
+            self.__one_hot_encode(
+                self.__dataset.test[idx]))
+        exp = self.__explainer.explain_instance(
+            self.__dataset.test[idx],
+            self.__predict,
+            threshold)
+            
+        anchor['precision'] = exp.precision()
+        anchor['coverage'] = exp.coverage()
+        anchor['anchor'] = ' AND '.join(exp.names())
+
+        return anchor
+    
+    
+    async def __explain_model(
+        self,
+        threshold,
+        sample):
+
+        loop = asyncio.get_event_loop()
+        samples = [
+            loop.run_in_executor(
+                None,
+                self.__explain_sample,
+                idx,
+                threshold) for idx in random.sample(
+                range(len(self.__dataset.test)),
+                sample)]
+        return [await s for s in samples]
+
+    
     def explain_model(
         self,
         threshold = 0.95,
@@ -303,34 +342,9 @@ class Explainer:
         
         self.__check_requisites()
         
-        anchors = {
-            'anchor': [],
-            'precision': [],
-            'coverage' : [],
-            'prediction' : []}
-        
-        for idx in random.sample(
-            range(len(self.__dataset.test)),
-            sample):
-            
-            
-            anchors['prediction'].append(
-                self.__predict_record(
-                    self.__one_hot_encode(
-                        self.__dataset.test[idx])))
-            
-            
-            exp = self.__explainer.explain_instance(
-            self.__dataset.test[idx],
-            self.__predict,
-            threshold)
-            
-            anchors['precision'].append(exp.precision()) 
-            anchors['coverage'].append(exp.coverage()) 
-            anchors['anchor'].append(
-                ' AND '.join(exp.names())) 
+        anchors = self.__event_loop.run_until_complete(
+            self.__explain_model(threshold, sample))
                     
-            
         return pandas.DataFrame(
             anchors).drop_duplicates(
             ['anchor']).sort_values(
