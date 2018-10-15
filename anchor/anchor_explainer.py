@@ -1,10 +1,12 @@
 from anchor import utils
 from anchor import anchor_tabular
+import asyncio
 import numpy as np
 import pandas
 import random
+import requests
 import itertools
-import googleapiclient.discovery
+import json
 from tensorflow.python.lib.io import file_io
 from pandas.compat import StringIO
 
@@ -12,23 +14,26 @@ from pandas.compat import StringIO
 class Explainer:
 
     def __cmle_predict(self, record):
+        
         name = 'projects/{}/models/{}'.format(self.__gcp_project, self.__gcp_model)
         if self.__gcp_model_version is not None:
             name += '/versions/{}'.format(self.__gcp_model_version)
 
-        response = self.__cmle_service.predict(
-            name=name,
-            body={'instances': record}
-        ).execute()
+        url = 'https://ml.googleapis.com/v1/' + name + ':predict'
+        
+        result  = requests.post(
+            url,
+            json={'instances': record},
+            headers={
+                'Authorization':'Bearer ' + self.__access_token})
 
-        if 'error' in response:
-            raise RuntimeError(response['error'])
+        response  = json.loads(result.text)
 
         return response['predictions']
 
 
     def __get_label_values (self):
-        self.__categorical_labels = utils.load_csv_dataset(
+        cat_labels = utils.load_csv_dataset(
             data=StringIO(self.__csv_file),
             feature_names = self.__feature_names,
             target_idx = -1,
@@ -37,8 +42,12 @@ class Explainer:
             features_to_use= [self.__target_idx],
             discretize = True
           ).categorical_names[0]
+        self.__categorical_labels = [
+            bytes(
+                x,
+                'utf-8') for x in cat_labels]
         return [float(
-            self.__categorical_labels[i].split(
+            cat_labels[i].split(
                 ' <= ')[-1]) for i in range(3)]
 
 
@@ -232,6 +241,7 @@ class Explainer:
         self,
         gcp_project,
         gcp_model,
+        access_token,
         gcp_model_version=None,
         padding = (1,0),
         output_func = lambda x: x[
@@ -243,9 +253,36 @@ class Explainer:
         self.__pre_pad = ['0' for _ in range(padding[0])]
         self.__post_pad = ['0' for _ in range(padding[1])]
         self.__output_func = output_func
-        self.__cmle_service = googleapiclient.discovery.build(
-            'ml', 'v1').projects()
+        self.__access_token = access_token
     
+    
+    def __assess_sample(
+        self,
+        idx):
+        if self.__explainer.class_names[
+                self.__dataset.labels_test[idx]] == self.__predict_record(
+                self.__one_hot_encode(
+                    self.__dataset.test[idx])):
+            return 1
+        else:
+            return 0
+        
+    
+    async def __assess_model(
+        self,
+        sample):
+        
+        loop = asyncio.get_event_loop()
+        samples = [
+            loop.run_in_executor(
+                None,
+                self.__assess_sample,
+                idx) for idx in random.sample(
+                range(len(self.__dataset.test)),
+                sample)]
+        responses = [await s for s in samples]
+        
+        return sum(responses)
     
     def assess_model(
         self,
@@ -253,18 +290,9 @@ class Explainer:
         
         self.__check_requisites()
         
-        accurate = 0
-        for idx in random.sample(
-            range(len(self.__dataset.test)),
-            sample):
-            
-            if self.__explainer.class_names[
-                self.__dataset.labels_test[idx]] == self.__predict_record(
-                self.__one_hot_encode(
-                    self.__dataset.test[idx])):
-                
-                accurate = accurate + 1
-        
+        accurate = self.__event_loop.run_until_complete(
+            self.__assess_model(sample))
+
         return {'accuracy' : accurate/float(sample)}
 
     
@@ -365,7 +393,6 @@ class Explainer:
         self.__check_requisites()
         
         idx = random.randint(0,len(self.__dataset.test))
-        
         return self.__explain_record(
             self.__dataset.test[idx],
             threshold,
@@ -376,7 +403,7 @@ class Explainer:
         if not '_Explainer__explainer' in self.__dict__:
             raise Exception(
                 'Please load a dataset using load_data(...)')
-        if not '_Explainer__cmle_service' in self.__dict__:
+        if not '_Explainer__gcp_model' in self.__dict__:
             raise Exception(
                 'Please create a cmle client using create_cmle_client(...)')
     
@@ -397,4 +424,5 @@ class Explainer:
         model_type = 'regression'
     ):
         self.model_type = model_type
+        self.__event_loop =  asyncio.new_event_loop()
         
