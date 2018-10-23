@@ -1,4 +1,3 @@
-from anchor import utils
 from anchor import anchor_tabular
 import asyncio
 import numpy as np
@@ -9,6 +8,11 @@ import itertools
 import json
 from tensorflow.python.lib.io import file_io
 from pandas.compat import StringIO
+
+import utils
+
+REGRESSION = 'regression'
+CLASSIFICATION =  'classification'
 
 
 class Explainer:
@@ -28,7 +32,6 @@ class Explainer:
                 'Authorization':'Bearer ' + self.__access_token})
 
         response  = json.loads(result.text)
-
         return response['predictions']
 
 
@@ -125,8 +128,8 @@ class Explainer:
                             val_list[buck].append(float(val))
                             break
                 val_buckets.append(
-                  [str(int(np.median(val_list[buck]))) if np.median(val_list[buck]).is_integer() else str(
-                      np.median(val_list[buck])) for buck in range(len(self.__col_buckets[col]))])
+                [int(np.median(val_list[buck])) if np.median(val_list[buck]).is_integer() else np.median(
+                    val_list[buck]) for buck in range(len(self.__col_buckets[col]))])
             else:
                 val_buckets.append(self.__col_buckets[col])
 
@@ -136,7 +139,6 @@ class Explainer:
 
     def __encode_record(self, record):
         encoded = []
-        record = record.split(',')
         for val in range(
             len(record)):
             
@@ -167,12 +169,24 @@ class Explainer:
     
     def __predict(self, record):
 
-        pred_data = [','.join(self.__pre_pad + self.__decode_record(
-            record[i,:]) + self.__post_pad) for i in range(
-            record.shape[0])]
+        if self.__csv_record:
+            pred_data = [','.join(self.__pre_pad + [
+                str(
+                    x) for x in self.__decode_record(
+                        record[i,:])] + self.__post_pad) for i in range(
+                            record.shape[0])]
+        
+        else:
+            pred_data = [dict(zip(
+                self.__dataset.feature_names,
+                self.__decode_record(
+                record[i,:])))for i in range(
+                    record.shape[0])]
+        
         predictions = self.__cmle_predict(pred_data)
         predictions = [self.__output_func(x) for x in predictions]
-        predictions = self.__transform_labels(predictions)
+        if self.model_type == REGRESSION:
+            predictions = self.__transform_labels(predictions)
         predictions = [self.__label_map[x] for x in predictions]
         predictions = np.array(predictions)
         return predictions
@@ -202,21 +216,31 @@ class Explainer:
             gcs_path,
             mode='r').read()
         
-        self.__transform_labels = self.__create_transform_func(
-            self.__get_label_values())
-        
-        self.__dataset  = utils.load_csv_dataset(
-            data=StringIO(self.__csv_file),
-            feature_names = feature_names,
-            skip_first = skip_first,
-            target_idx =target_idx,
-            categorical_features = categorical_features,
-            features_to_use= features_to_use,
-            discretize = True,
-            feature_transformations = {
-              target_idx : self.__transform_labels
-            }
-          )
+        if self.model_type == REGRESSION:
+            self.__transform_labels = self.__create_transform_func(
+                self.__get_label_values())
+            
+            self.__dataset  = utils.load_csv_dataset(
+                data=StringIO(self.__csv_file),
+                feature_names = feature_names,
+                skip_first = skip_first,
+                target_idx =target_idx,
+                categorical_features = categorical_features,
+                features_to_use= features_to_use,
+                discretize = True,
+                feature_transformations = {
+                target_idx : self.__transform_labels
+                })
+        else:
+            self.__dataset  = utils.load_csv_dataset(
+                data=StringIO(self.__csv_file),
+                feature_names = feature_names,
+                skip_first = skip_first,
+                target_idx =target_idx,
+                categorical_features = categorical_features,
+                features_to_use= features_to_use,
+                discretize = True)
+
         
         self.__label_map = {
             self.__dataset.class_names[i] : i for i in range(
@@ -243,12 +267,14 @@ class Explainer:
         gcp_model,
         access_token,
         gcp_model_version=None,
+        csv_record=True,
         padding = (1,0),
         output_func = lambda x: x[
             'predictions'][0]):
     
         self.__gcp_project = gcp_project
         self.__gcp_model = gcp_model
+        self.__csv_record = csv_record
         self.__gcp_model_version = gcp_model_version
         self.__pre_pad = ['0' for _ in range(padding[0])]
         self.__post_pad = ['0' for _ in range(padding[1])]
@@ -435,7 +461,7 @@ class Explainer:
 
     def __init__(
         self,
-        model_type = 'regression'
+        model_type = REGRESSION
     ):
         self.model_type = model_type
         self.__event_loop =  asyncio.new_event_loop()
