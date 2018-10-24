@@ -1,6 +1,7 @@
 import lime
 import random
 import sklearn
+import warnings
 import numpy as np
 import pandas as pd
 import lime.lime_tabular
@@ -8,25 +9,31 @@ import googleapiclient.discovery
 
 from tensorflow.python.lib.io import file_io
 
+REGRESSION = 'regression'
+CLASSIFICATION = 'classification'
+
+warnings.filterwarnings(action='ignore', category=DeprecationWarning)
+warnings.filterwarnings(action='ignore', category=RuntimeWarning)
 
 
 class Explainer:
 
-    def __init__(self, model_type='regression'):
+    def __init__(self, model_type=REGRESSION):
         self.model_type = model_type
 
     def load_data(
             self,
             gcs_path,
+            target_idx,
             features_to_use=None,
             categorical_features=[],
             feature_names=None,
-            skip_rows=0
+            skip_first=False
     ):
 
-        # self.__target_idx = target_idx
         self.__features_to_use = features_to_use
-        self.__skip_rows = skip_rows
+        self.__target_idx = target_idx
+        self.__skip_rows = 0 if skip_first is False else 1
 
         with file_io.FileIO(gcs_path, 'r') as f:
             data = pd.read_csv(f,
@@ -37,13 +44,20 @@ class Explainer:
                                skiprows=self.__skip_rows)
 
         self.__data = data.iloc[:100]
+        labels = data.iloc[:, target_idx]
         data = data.iloc[:, self.__features_to_use]
+
         self.__categorical_features = [self.__features_to_use.index(i)
                                        for i in categorical_features]
         self.__feature_names = [feature_names[i] for i in
                                 self.__features_to_use]
         data, categorical_names, le_list = self.__encode_categorical(
             data)
+
+        if self.model_type == CLASSIFICATION:
+            self.__class_names = self.__get_class_names(labels)
+        else:
+            self.__class_names = ["target"]
 
         self.__categorical_names = categorical_names
         self.__le_list = le_list
@@ -52,11 +66,17 @@ class Explainer:
         self.__explainer = lime.lime_tabular.LimeTabularExplainer(
             self.__dataset,
             feature_names=self.__feature_names,
+            class_names=self.__class_names,
             categorical_features=self.__categorical_features,
             categorical_names=self.__categorical_names,
             verbose=True,
             mode=self.model_type,
         )
+
+    def __get_class_names(self, labels):
+        le = sklearn.preprocessing.LabelEncoder()
+        le.fit(labels)
+        return le.classes_
 
     def __encode_categorical(self, data):
         categorical_names = {}
@@ -74,12 +94,14 @@ class Explainer:
             gcp_project,
             gcp_model,
             gcp_model_version=None,
+            csv_record=True,
             padding=(1, 0),
             output_func=lambda x: x[
                 'predictions'][0]):
 
         self.__gcp_project = gcp_project
         self.__gcp_model = gcp_model
+        self.__csv_record = csv_record
         self.__gcp_model_version = gcp_model_version
         self.__pre_pad = ['0' for _ in range(padding[0])]
         self.__post_pad = ['0' for _ in range(padding[1])]
@@ -114,9 +136,17 @@ class Explainer:
         return row.tolist()
 
     def __pred_fn(self, record):
-        pred_data = [','.join(self.__pre_pad + self.__decode_record(
-            record[i, :]) + self.__post_pad) for i in range(
-            record.shape[0])]
+        if self.__csv_record:
+            pred_data = [','.join(self.__pre_pad + self.__decode_record(
+                record[i, :]) + self.__post_pad) for i in range(
+                record.shape[0])]
+        else:
+            pred_data = [dict(zip(
+                self.__dataset.feature_names,
+                self.__decode_record(
+                    record[i, :]))) for i in range(
+                record.shape[0])]
+
         predictions = self.__cmle_predict(pred_data)
         predictions = [self.__output_func(x) for x in predictions]
         predictions = np.array(predictions)
@@ -140,7 +170,7 @@ class Explainer:
             exp.show_in_notebook()
 
         list_of_vals = exp.as_list()
-        df = pd.DataFrame({
+        df = pd.DataFrame.from_dict({
             'representation': [rep for rep, _ in list_of_vals],
             'weight': [weight for _, weight in list_of_vals]})
         return record.tolist(), df
