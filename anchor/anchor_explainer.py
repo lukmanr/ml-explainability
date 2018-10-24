@@ -51,7 +51,7 @@ class Explainer:
                 'utf-8') for x in cat_labels]
         return [float(
             cat_labels[i].split(
-                ' <= ')[-1]) for i in range(3)]
+                ' <= ')[-1]) for i in range(9)]
 
 
 
@@ -70,9 +70,27 @@ class Explainer:
                 if x > quant_val[1] and x <= quant_val[2]:
                     labels.append(
                         self.__categorical_labels[2])
-                if x > quant_val[2]:
+                if x > quant_val[2] and x <= quant_val[3]:
                     labels.append(
                         self.__categorical_labels[3])
+                if x > quant_val[3] and x <= quant_val[4]:
+                    labels.append(
+                        self.__categorical_labels[4])
+                if x > quant_val[4] and x <= quant_val[5]:
+                    labels.append(
+                        self.__categorical_labels[5])
+                if x > quant_val[5] and x <= quant_val[6]:
+                    labels.append(
+                        self.__categorical_labels[6])
+                if x > quant_val[6] and x <= quant_val[7]:
+                    labels.append(
+                        self.__categorical_labels[7])
+                if x > quant_val[7] and x <= quant_val[8]:
+                    labels.append(
+                        self.__categorical_labels[8])
+                if x > quant_val[8]:
+                    labels.append(
+                        self.__categorical_labels[9])
             return labels
 
         return transfrom_labels

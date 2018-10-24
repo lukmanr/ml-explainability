@@ -18,7 +18,8 @@ class Bunch(object):
 def load_csv_dataset(data, target_idx, delimiter=',',
                      feature_names=None, categorical_features=None,
                      features_to_use=None, feature_transformations=None,
-                     discretize=False, balance=False, fill_na='-1', filter_fn=None, skip_first=False):
+                     discretize=False, balance=False, fill_na='-1', filter_fn=None,
+                     skip_first=False):
     """if not feature names, takes 1st line as feature names
     if not features_to_use, use all except for target
     if not categorical_features, consider everything < 20 as categorical"""
@@ -80,9 +81,10 @@ def load_csv_dataset(data, target_idx, delimiter=',',
     data = data.astype(float)
     ordinal_features = []
     if discretize:
-        disc = lime.lime_tabular.QuartileDiscretizer(data,
-                                                     categorical_features,
-                                                     feature_names)
+        disc = lime.lime_tabular.DecileDiscretizer(
+            data,
+            categorical_features,
+            feature_names)
         data = disc.discretize(data)
         ordinal_features = [x for x in range(data.shape[1])
                             if x not in categorical_features]
