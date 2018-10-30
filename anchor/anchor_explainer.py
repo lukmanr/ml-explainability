@@ -18,7 +18,6 @@ CLASSIFICATION =  'classification'
 class Explainer:
 
     def __cmle_predict(self, record):
-        
         name = 'projects/{}/models/{}'.format(self.__gcp_project, self.__gcp_model)
         if self.__gcp_model_version is not None:
             name += '/versions/{}'.format(self.__gcp_model_version)
@@ -32,7 +31,12 @@ class Explainer:
                 'Authorization':'Bearer ' + self.__access_token})
 
         response  = json.loads(result.text)
-        return response['predictions']
+        try:
+            return response['predictions']
+        except:
+            print('record', record)
+            print('response',response)
+            return response['predictions']
 
 
     def __get_label_values (self):
@@ -353,7 +357,9 @@ class Explainer:
         exp = self.__explainer.explain_instance(
             self.__dataset.test[idx],
             self.__predict,
-            threshold)
+            threshold,
+            delta=0.05, tau=0.1, batch_size=10,
+            max_anchor_size=10)
             
         anchor['precision'] = exp.precision()
         anchor['coverage'] = exp.coverage()
@@ -403,7 +409,11 @@ class Explainer:
     def __explain_record(
         self,
         record,
-        threshold = 0.95,
+        threshold,
+        delta,
+        tau,
+        batch_size,
+        max_anchor_size,
         show_in_notebook = False):
         
         one_hot_record = self.__one_hot_encode(record)
@@ -413,7 +423,11 @@ class Explainer:
         exp = self.__explainer.explain_instance(
             record,
             self.__predict,
-            threshold)
+            threshold,
+            delta=delta,
+            tau=tau,
+            batch_size=batch_size,
+            max_anchor_size=max_anchor_size)
 
         if show_in_notebook:
             exp.show_in_notebook()
@@ -430,6 +444,10 @@ class Explainer:
         self,
         record,
         threshold = 0.95,
+        delta=0.05,
+        tau=0.2,
+        batch_size=100,
+        max_anchor_size=20,
         show_in_notebook = False):
         
         self.__check_requisites()
@@ -440,12 +458,20 @@ class Explainer:
         return self.__explain_record(
             record,
             threshold,
+            delta,
+            tau,
+            batch_size,
+            max_anchor_size,
             show_in_notebook)
         
         
     def explain_random_record(
         self,
         threshold = 0.95,
+        delta=0.05,
+        tau=0.2,
+        batch_size=100,
+        max_anchor_size=20,
         show_in_notebook = False):
         
         self.__check_requisites()
@@ -454,6 +480,10 @@ class Explainer:
         return self.__explain_record(
             self.__dataset.test[idx],
             threshold,
+            delta,
+            tau,
+            batch_size,
+            max_anchor_size,
             show_in_notebook)
         
                    
