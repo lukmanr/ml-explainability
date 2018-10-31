@@ -8,12 +8,16 @@ import lime.lime_tabular
 import googleapiclient.discovery
 
 from tensorflow.python.lib.io import file_io
+from lime import submodular_pick
 
 REGRESSION = 'regression'
 CLASSIFICATION = 'classification'
 
 warnings.filterwarnings(action='ignore', category=DeprecationWarning)
 warnings.filterwarnings(action='ignore', category=RuntimeWarning)
+warnings.filterwarnings(action='ignore', category=UserWarning)
+warnings.filterwarnings(action='ignore', category=FutureWarning)
+
 
 
 class Explainer:
@@ -25,12 +29,14 @@ class Explainer:
             self,
             gcs_path,
             target_idx,
+            integer_rows=[],
             features_to_use=None,
             categorical_features=[],
             feature_names=None,
             skip_first=False
     ):
 
+        self.__numeric_rows = integer_rows
         self.__features_to_use = features_to_use
         self.__target_idx = target_idx
         self.__skip_rows = 0 if skip_first is False else 1
@@ -43,7 +49,7 @@ class Explainer:
                                dtype=str,
                                skiprows=self.__skip_rows)
 
-        self.__data = data.iloc[:100]
+        # self.__data = data
         labels = data.iloc[:, target_idx]
         data = data.iloc[:, self.__features_to_use]
 
@@ -61,10 +67,11 @@ class Explainer:
 
         self.__categorical_names = categorical_names
         self.__le_list = le_list
-        self.__dataset = data.values.astype(float)
+        self.__train = data.values.astype(float)
+        self.data = data.values.astype(float)
 
         self.__explainer = lime.lime_tabular.LimeTabularExplainer(
-            self.__dataset,
+            self.__train,
             feature_names=self.__feature_names,
             class_names=self.__class_names,
             categorical_features=self.__categorical_features,
@@ -142,7 +149,7 @@ class Explainer:
                 record.shape[0])]
         else:
             pred_data = [dict(zip(
-                self.__dataset.feature_names,
+                self.__train.feature_names,
                 self.__decode_record(
                     record[i, :]))) for i in range(
                 record.shape[0])]
@@ -157,11 +164,11 @@ class Explainer:
             record,
             num_features=5,
             num_samples=10,
-            show_in_notebook=False,
-            need_to_encode=False
+            show_in_notebook=False
     ):
 
-        record = self.__encode_record(record, need_to_encode)
+        if isinstance(record, str):
+            record = np.array(record.split(",")).astype(float)
         exp = self.__explainer.explain_instance(record, self.__pred_fn,
                                                 num_features=num_features,
                                                 num_samples=num_samples)
@@ -175,23 +182,13 @@ class Explainer:
             'weight': [weight for _, weight in list_of_vals]})
         return record.tolist(), df
 
-    def __encode_record(self, record, need_to_encode):
-        record = np.array(record.split(","))
-        if need_to_encode:
-            record = record[self.__features_to_use]
-            for feature, le in zip(self.__categorical_features,
-                                   self.__le_list):
-                record[feature] = \
-                    le.transform(
-                        np.array(record[feature]).reshape(-1, ))[0]
-        return record.astype(float)
-
     def explain_record(
             self,
             record,
             show_in_notebook=False,
             num_features=5,
             num_samples=10):
+
 
         self.__check_requisites()
 
@@ -203,22 +200,39 @@ class Explainer:
 
     def explain_random_record(
             self,
-            numeric_rows,
             show_in_notebook=False,
             num_features=5,
             num_samples=10
     ):
-
         self.__check_requisites()
-        self.__numeric_rows = numeric_rows
-        idx = random.randint(0, len(self.__data))
+
+        idx = random.randint(0, len(self.__train))
 
         return self.__explain_record(
-            ','.join(str(e) for e in list(self.__data.iloc[idx, :])),
+            self.__train[idx],
             num_features,
             num_samples,
-            show_in_notebook,
-            need_to_encode=True)
+            show_in_notebook
+        )
+
+    def explain_model(self,
+                      sample_size=5,
+                      num_exps_desired=5,
+                      num_features=5,
+                      num_samples=10,
+                      show_in_notebook=False):
+        sp_obj = submodular_pick.SubmodularPick(self.__explainer,
+                                                self.__train,
+                                                self.__pred_fn,
+                                                method='sample',
+                                                sample_size=sample_size,
+                                                num_features=num_features,
+                                                num_exps_desired=num_exps_desired,
+                                                num_samples=num_samples)
+
+        if show_in_notebook:
+            [exp.as_pyplot_figure() for exp in sp_obj.sp_explanations]
+        return [exp.as_list() for exp in sp_obj.sp_explanations]
 
     def __check_requisites(self):
         if not '_Explainer__explainer' in self.__dict__:
