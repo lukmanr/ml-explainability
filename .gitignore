@@ -1,0 +1,15 @@
+.DS_Store
+
+# pyc files
+**/*.pyc
+
+# Python egg files
+**/*.egg-info/
+
+# Intellij or PyCharm
+.idea/
+
+#ipynb checkpoints
+**/.ipynb_checkpoints
+
+*.txt
