@@ -19,4 +19,8 @@
 
 2. Open JupyterLab
 
-3. Use the 'git clone' button to clone this repository from git
+3. Use the 'git clone' button to clone this repository from git, or the 'upload files' button to upload from a local directory.
+
+4. Open a Terminal window in JupyterLab
+
+5. ```pip install anchor-exp lime```
