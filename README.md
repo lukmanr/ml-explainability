@@ -15,6 +15,8 @@
 
 ## Run in AI Platform Notebooks
 
-1.  Create a Tensorflow 1.x Notebook following the instructions in the [AI Platform Documentation](https://cloud.google.com/ml-engine/docs/notebooks/create-new)
+1. Create a Tensorflow 1.x Notebook following the instructions in the [AI Platform Documentation](https://cloud.google.com/ml-engine/docs/notebooks/create-new)
 
-2.
+2. Open JupyterLab
+
+3. Use the 'git clone' button to clone this repository from git
